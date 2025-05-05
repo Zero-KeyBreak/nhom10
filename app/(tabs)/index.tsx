@@ -32,7 +32,16 @@ export default function App() {
 
       if (tag?.ndefMessage) {
         const decoded = tag.ndefMessage.map(r => Ndef.text.decodePayload(r.payload));
-        setTagData(decoded.join('\n'));
+        const data = decoded.join('\n');
+
+        // Kiểm tra loại thẻ
+        if (data.includes('CCCD')) {
+          setTagData(`📇 Thông tin CCCD:\n${data}`);
+        } else if (data.includes('Visa') || data.includes('MasterCard')) {
+          setTagData(`💳 Thông tin thẻ Visa/MasterCard:\n${data}`);
+        } else {
+          setTagData(`📄 Nội dung thẻ:\n${data}`);
+        }
       } else {
         setTagData('Thẻ không có nội dung.');
       }
@@ -103,7 +112,7 @@ export default function App() {
 
       {tagData && (
         <View style={styles.result}>
-          <Text style={styles.resultLabel}>📄 Nội dung thẻ:</Text>
+          <Text style={styles.resultLabel}>📄 Kết quả:</Text>
           <Text style={styles.resultText}>{tagData}</Text>
         </View>
       )}
