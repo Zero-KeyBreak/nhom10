@@ -8,6 +8,7 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import NfcManager, { NfcTech, Ndef } from 'react-native-nfc-manager';
 
@@ -19,6 +20,10 @@ export default function App() {
   const [text, setText] = useState('');
   const [tagData, setTagData] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [serialNumber, setSerialNumber] = useState('');
+  const [techList, setTechList] = useState('');
+  const [maxTransceiveLength, setMaxTransceiveLength] = useState('');
+  const [ndefContent, setNdefContent] = useState('');
 
   useEffect(() => {
     initNfc();
@@ -30,20 +35,26 @@ export default function App() {
       await NfcManager.requestTechnology(NfcTech.Ndef);
       const tag = await NfcManager.getTag();
 
-      if (tag?.ndefMessage) {
-        const decoded = tag.ndefMessage.map(r => Ndef.text.decodePayload(r.payload));
-        const data = decoded.join('\n');
+      if (tag) {
+        console.log('Tag details:', tag);
+        // Lấy thông tin chi tiết từ thẻ
+        const serialNumber = tag.id ? tag.id : 'Không xác định';
+        const techList = tag.techTypes ? tag.techTypes.join(', ') : 'Không xác định';
 
-        // Kiểm tra loại thẻ
-        if (data.includes('CCCD')) {
-          setTagData(`📇 Thông tin CCCD:\n${data}`);
-        } else if (data.includes('Visa') || data.includes('MasterCard')) {
-          setTagData(`💳 Thông tin thẻ Visa/MasterCard:\n${data}`);
-        } else {
-          setTagData(`📄 Nội dung thẻ:\n${data}`);
+        // Kiểm tra nội dung NDEF
+        let ndefContent = 'Không tìm thấy dữ liệu';
+        if (tag.ndefMessage) {
+          const decoded = tag.ndefMessage.map(r => Ndef.text.decodePayload(r.payload));
+          ndefContent = decoded.join('\n');
         }
+
+        // Hiển thị thông tin chi tiết
+        setSerialNumber(serialNumber);
+        setTechList(techList);
+        setNdefContent(ndefContent);
+        setTagData('Thông tin thẻ đã được đọc.');
       } else {
-        setTagData('Thẻ không có nội dung.');
+        setTagData('Không tìm thấy dữ liệu trên thẻ.');
       }
     } catch (e) {
       console.warn('Read error', e);
@@ -93,7 +104,7 @@ export default function App() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>🔄 NFC Manager</Text>
 
       <View style={styles.row}>
@@ -113,7 +124,19 @@ export default function App() {
       {tagData && (
         <View style={styles.result}>
           <Text style={styles.resultLabel}>📄 Kết quả:</Text>
-          <Text style={styles.resultText}>{tagData}</Text>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>Số sê-ri:</Text>
+            <Text style={styles.infoText}>{serialNumber}</Text>
+          </View>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>Công nghệ hỗ trợ:</Text>
+            <Text style={styles.infoText}>[{techList}]</Text>
+          </View>
+         
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>Nội dung NDEF:</Text>
+            <Text style={styles.infoText}>{ndefContent}</Text>
+          </View>
         </View>
       )}
 
@@ -123,13 +146,13 @@ export default function App() {
           <Text style={{ marginTop: 10 }}>Đang xử lý NFC...</Text>
         </View>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flexGrow: 1,
     padding: 20,
     paddingTop: 60,
     backgroundColor: '#f0f0f0',
@@ -163,7 +186,19 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 6,
   },
-  resultText: {
+  infoBox: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
+    padding: 10,
+    marginBottom: 10,
+    backgroundColor: '#f9f9f9',
+  },
+  infoLabel: {
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  infoText: {
     fontSize: 16,
     color: '#333',
   },
