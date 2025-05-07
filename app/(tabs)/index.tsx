@@ -15,14 +15,26 @@ import { Buffer } from 'buffer';
 
 global.Buffer = global.Buffer || Buffer;
 
+// ✅ Khởi động NFC
 function initNfc() {
   NfcManager.start();
 }
 
+// ✅ Hàm đọc thẻ EMV (Visa/MasterCard)
 async function parseEmvResponse(tag) {
   const selectPpse = '00A404000E325041592E5359532E444446303100';
   const getProcessingOpts = '80A8000002830000';
-  const aidList = ['A0000000031010', 'A0000000041010'];
+
+  const aidList = [
+    'A0000000031010', // Visa Credit
+    'A0000000032010', // Visa Debit
+    'A0000000033010', // Visa Electron
+    'A0000000034010', // Interlink
+    'A0000000039010', // US Interlink
+    'A0000000041010', // MasterCard
+    'A0000000043060', // Maestro
+    'A0000000042203', // Maestro UK
+  ];
 
   try {
     let resp = await NfcManager.transceive([...Buffer.from(selectPpse, 'hex')]);
@@ -32,12 +44,15 @@ async function parseEmvResponse(tag) {
 
     let selectedAid = null;
     for (const aid of aidList) {
-      resp = await NfcManager.transceive([...Buffer.from(`00A40400${(aid.length / 2).toString(16).padStart(2, '0')}${aid}`, 'hex')]);
-      hex = Buffer.from(resp).toString('hex');
-      if (hex.endsWith('9000')) {
-        selectedAid = aid;
-        break;
-      }
+      const aidCommand = `00A40400${(aid.length / 2).toString(16).padStart(2, '0')}${aid}`;
+      try {
+        resp = await NfcManager.transceive([...Buffer.from(aidCommand, 'hex')]);
+        hex = Buffer.from(resp).toString('hex');
+        if (hex.endsWith('9000')) {
+          selectedAid = aid;
+          break;
+        }
+      } catch (_) {}
     }
 
     if (!selectedAid) return { pan: 'Không rõ', expiry: 'Không rõ', name: 'Không rõ' };
@@ -56,20 +71,18 @@ async function parseEmvResponse(tag) {
       } catch (_) {}
     }
 
-    if (!fullHex) return { pan: 'Không rõ', expiry: 'Không rõ', name: 'Không rõ' };
-
     const panMatch = fullHex.match(/5A([0-9A-F]+?)(?:F|9000|$)/i);
-    let pan = panMatch ? panMatch[1] : 'Không rõ';
-    if (pan !== 'Không rõ') { 
-      pan = pan.replace(/^08+/, '');
-      pan = pan.replace(/F+$/, '')
-    };
+    let pan = panMatch ? panMatch[1].replace(/^08+/, '').replace(/5+$/, '') : 'Không rõ';
 
     const expMatch = fullHex.match(/5F24([0-9A-F]{4})/i);
-    const expiry = expMatch ? `${expMatch[1].substring(0, 2)}/${expMatch[1].substring(2, 4)}` : 'Không rõ';
+    const expiry = expMatch
+      ? `${expMatch[1].substring(0, 2)}/${expMatch[1].substring(2, 4)}`
+      : 'Không rõ';
 
     const nameMatch = fullHex.match(/5F20([0-9A-F]+)/i);
-    const name = nameMatch ? Buffer.from(nameMatch[1], 'hex').toString('utf-8').trim() : 'Không rõ';
+    const name = nameMatch
+      ? Buffer.from(nameMatch[1], 'hex').toString('utf-8').trim()
+      : 'Không rõ';
 
     return { pan, expiry, name };
   } catch (err) {
@@ -101,22 +114,18 @@ export default function App() {
       const tag = await NfcManager.getTag();
 
       if (tag) {
-        const techList = tag.techTypes?.join(', ') ?? 'Không xác định';
         const emvInfo = await parseEmvResponse(tag);
+        const techs = tag.techTypes?.join(', ') ?? 'Không xác định';
 
-        if (emvInfo.pan === 'Không đọc được') {
-          setTagData('Không thể đọc dữ liệu từ thẻ Visa/MasterCard.');
-        } else {
-          setSerialNumber(tag.id ?? 'Không xác định');
-          setTechList(techList);
-          setNdefContent(`Tên: ${emvInfo.name}\nSố thẻ: ${emvInfo.pan}\nHết hạn: ${emvInfo.expiry}`);
-          setTagData('Đã đọc thẻ EMV (ngân hàng).');
-        }
+        setSerialNumber(tag.id ?? 'Không xác định');
+        setTechList(techs);
+        setNdefContent(`Số thẻ: ${emvInfo.pan}\nHết hạn: ${emvInfo.expiry}`);
+        setTagData('Đã đọc thẻ EMV.');
       } else {
-        setTagData('Không phát hiện được thẻ.');
+        setTagData('Không phát hiện thẻ.');
       }
     } catch (e) {
-      setTagData('Lỗi khi đọc thẻ NFC.');
+      setTagData('Lỗi khi đọc thẻ.');
     } finally {
       await NfcManager.cancelTechnologyRequest();
       setLoading(false);
@@ -124,18 +133,14 @@ export default function App() {
   }
 
   async function writeNfc() {
-    if (!text.trim()) {
-      Alert.alert('Vui lòng nhập nội dung');
-      return;
-    }
-
+    if (!text.trim()) return Alert.alert('⚠️ Vui lòng nhập nội dung');
     try {
       setLoading(true);
       await NfcManager.requestTechnology(NfcTech.Ndef);
       const bytes = Ndef.encodeMessage([Ndef.textRecord(text)]);
       await NfcManager.ndefHandler.writeNdefMessage(bytes);
       Alert.alert('✅ Ghi thành công');
-    } catch (e) {
+    } catch {
       Alert.alert('❌ Ghi lỗi');
     } finally {
       await NfcManager.cancelTechnologyRequest();
@@ -150,7 +155,7 @@ export default function App() {
       await NfcManager.ndefHandler.writeNdefMessage([]);
       Alert.alert('🧹 Đã xóa nội dung trên thẻ');
       setTagData(null);
-    } catch (e) {
+    } catch {
       Alert.alert('❌ Xóa thất bại');
     } finally {
       await NfcManager.cancelTechnologyRequest();
@@ -162,7 +167,6 @@ export default function App() {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>💳 NFC EMV Reader</Text>
 
-      <Text style={styles.subTitle}>🔄 Chức năng</Text>
       <View style={styles.actionRow}>
         <Button title="📥 Quét Thẻ" color="#007AFF" onPress={readNfc} />
         <Button title="🧹 Xóa Dữ Liệu" color="#FF3B30" onPress={clearNfc} />
@@ -170,7 +174,7 @@ export default function App() {
 
       <TextInput
         style={styles.input}
-        placeholder="✍️ Nhập nội dung cần ghi vào thẻ"
+        placeholder="✍️ Nhập nội dung cần ghi"
         value={text}
         onChangeText={setText}
       />
@@ -178,27 +182,8 @@ export default function App() {
 
       {tagData && (
         <View style={styles.card}>
-          <Text style={styles.resultLabel}>📄 Kết quả đọc:</Text>
-
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>🔢 Số sê-ri:</Text>
-            <Text style={styles.infoText}>{serialNumber}</Text>
-          </View>
-
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>📶 Công nghệ hỗ trợ:</Text>
-            <Text style={styles.infoText}>[{techList}]</Text>
-          </View>
-
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>💳 Số thẻ:</Text>
-            <Text style={styles.infoText}>{ndefContent.split('\n')[1]}</Text>
-          </View>
-
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>⏳ Hết hạn:</Text>
-            <Text style={styles.infoText}>{ndefContent.split('\n')[2]}</Text>
-          </View>
+          <Text style={styles.resultLabel}>📄 Kết quả:</Text>
+          <Text style={styles.infoText}>{ndefContent}</Text>
         </View>
       )}
 
@@ -206,7 +191,7 @@ export default function App() {
         <View style={styles.modal}>
           <View style={styles.modalBox}>
             <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={{ marginTop: 12 }}>🔄 Đang xử lý NFC...</Text>
+            <Text style={{ marginVertical: 12 }}>🔄 Đang xử lý NFC...</Text>
             <Button
               title="❌ Huỷ"
               onPress={async () => {
@@ -235,11 +220,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#007AFF',
     marginBottom: 20,
-  },
-  subTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 10,
   },
   actionRow: {
     flexDirection: 'row',
@@ -272,17 +252,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 10,
   },
-  infoItem: {
-    marginBottom: 10,
-  },
-  infoLabel: {
-    fontWeight: 'bold',
-    fontSize: 15,
-    color: '#333',
-  },
   infoText: {
     fontSize: 16,
-    color: '#555',
+    color: '#333',
+    lineHeight: 22,
   },
   modal: {
     flex: 1,
